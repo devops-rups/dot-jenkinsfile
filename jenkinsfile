@@ -1,0 +1,126 @@
+pipeline {
+    agent any
+    
+    environment {
+        BASE_DIRECTORY = "/var/www/backups"
+        SOURCE_DIRECTORY = "/var/www/development/shcbackend/main-service"
+        ZIP_FILE = "/var/www/releaseupload/main-service/WebApp.zip"
+        TEMP_DIR = "/var/www/releaseupload/main-service/temp"
+        TARGET_DIR = "/var/www/development/shcbackend/main-service"
+        SERVICE_NAME = "main-service.service"
+        DATE_TIME = "$(date +%Y-%m-%d_%H-%M-%S)"
+        BACKUP_DIRECTORY = "${BASE_DIRECTORY}/main-service_backup_${DATE_TIME}"
+        CONFIG_FILE_NAME = "appsettings.production.json"
+    }
+    
+    stages {
+        stage('Backup') {
+            steps {
+                script {
+                    sh '''
+                        echo "Creating backup directory: ${BACKUP_DIRECTORY}"
+                        sudo mkdir -p "${BACKUP_DIRECTORY}"
+                        sudo rsync -av "${SOURCE_DIRECTORY}/" "${BACKUP_DIRECTORY}"
+                        echo "Backup completed successfully: ${BACKUP_DIRECTORY}"
+                    '''
+                }
+            }
+        }
+        
+        stage('Stop Service') {
+            steps {
+                script {
+                    sh '''
+                        echo "Stopping service: ${SERVICE_NAME}"
+                        sudo systemctl stop ${SERVICE_NAME} || exit 1
+                    '''
+                }
+            }
+        }
+        
+        stage('Prepare Deployment') {
+            steps {
+                script {
+                    sh '''
+                        echo "Creating backup of existing deployment..."
+                        rm -rf "${TARGET_DIR}.bak"
+                        mv "${TARGET_DIR}" "${TARGET_DIR}.bak"
+                        mkdir -p "${TARGET_DIR}"
+                    '''
+                }
+            }
+        }
+        
+        stage('Extract & Configure') {
+            steps {
+                script {
+                    sh '''
+                        mkdir -p "${TEMP_DIR}"
+                        unzip -q "${ZIP_FILE}" -d "${TEMP_DIR}" || exit 1
+                        CONFIG_FILE_PATH=$(find "${TEMP_DIR}" -type f -name "${CONFIG_FILE_NAME}")
+                        if [ -n "${CONFIG_FILE_PATH}" ]; then
+                            CONFIG_DIR=$(dirname "${CONFIG_FILE_PATH}")
+                            cp "${CONFIG_FILE_PATH}" "${CONFIG_DIR}/appsettings.json"
+                            echo "Updated appsettings.json with ${CONFIG_FILE_PATH}"
+                        else
+                            echo "Error: ${CONFIG_FILE_NAME} not found! Rolling back..."
+                            exit 1
+                        fi
+                    '''
+                }
+            }
+        }
+        
+        stage('Move Files') {
+            steps {
+                script {
+                    sh '''
+                        find "${TEMP_DIR}" -type f -exec mv {} "${TARGET_DIR}/" \;
+                        find "${TEMP_DIR}" -type d -empty -delete
+                        rm -rf "${TEMP_DIR}"
+                    '''
+                }
+            }
+        }
+        
+        stage('Start Service') {
+            steps {
+                script {
+                    sh '''
+                        echo "Starting service: ${SERVICE_NAME}"
+                        sudo systemctl start ${SERVICE_NAME} || exit 1
+                    '''
+                }
+            }
+        }
+        
+        stage('Cleanup') {
+            steps {
+                script {
+                    sh '''
+                        echo "Cleaning up old backup..."
+                        rm -rf "${TARGET_DIR}.bak"
+                    '''
+                }
+            }
+        }
+    }
+    
+    post {
+        failure {
+            script {
+                sh '''
+                    echo "Deployment failed. Rolling back..."
+                    rm -rf "${TARGET_DIR}/*"
+                    mv "${TARGET_DIR}.bak"/* "${TARGET_DIR}/"
+                    rmdir "${TARGET_DIR}.bak"
+                    sudo systemctl start "${SERVICE_NAME}"
+                    echo "Rollback completed."
+                '''
+            }
+        }
+        success {
+            echo 'Deployment completed successfully!'
+        }
+    }
+}
