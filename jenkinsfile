@@ -12,8 +12,16 @@ pipeline {
         BACKUP_DIRECTORY = "${BASE_DIRECTORY}/main-service_backup_${DATE_TIME}"
         CONFIG_FILE_NAME = "appsettings.production.json"
     }
-    
+
     stages {
+        stage('Checkout Code') {
+            steps {
+                git branch: 'main', 
+                    credentialsId: 'your-github-credentials-id', 
+                    url: 'https://github.com/devops-rups/dot-net.git'
+            }
+        }
+
         stage('Backup') {
             steps {
                 script {
@@ -26,7 +34,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Stop Service') {
             steps {
                 script {
@@ -37,7 +45,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Prepare Deployment') {
             steps {
                 script {
@@ -50,7 +58,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Extract & Configure') {
             steps {
                 script {
@@ -70,7 +78,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Move Files') {
             steps {
                 script {
@@ -82,7 +90,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Start Service') {
             steps {
                 script {
@@ -93,7 +101,7 @@ pipeline {
                 }
             }
         }
-        
+
         stage('Cleanup') {
             steps {
                 script {
@@ -105,7 +113,7 @@ pipeline {
             }
         }
     }
-    
+
     post {
         failure {
             script {
